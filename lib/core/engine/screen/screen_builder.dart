@@ -83,7 +83,7 @@ class _ScreenBuilderState extends ConsumerState<ScreenBuilder> {
 
     final patchedJson = _patchUploadDocumentsStateIfNeeded(widget.json, ref);
 
-    final resolvedJson = JsonResolver.resolve(patchedJson);
+    final resolvedJson = JsonResolver.resolve(context,patchedJson);
 
     final ui = Map<dynamic, dynamic>.from(resolvedJson['ui'] ?? {});
     final layout = List<Map<dynamic, dynamic>>.from(ui['layout'] ?? []);

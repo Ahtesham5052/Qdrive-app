@@ -1295,6 +1295,8 @@ const Map<dynamic, dynamic> preferencesJson = {
       },
     ],
   },
+
+
 };
 
 const Map<dynamic, dynamic> paymentsSettingsJson = {

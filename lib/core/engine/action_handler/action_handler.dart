@@ -4,6 +4,7 @@ import 'package:Qdrive/app/constants/app_constants.dart';
 import 'package:Qdrive/app/provider/app_settings_provider.dart';
 import 'package:Qdrive/app/theme/provider/app_theme_provider.dart';
 import 'package:Qdrive/app/configurations/app_config.dart';
+import 'package:Qdrive/core/engine/action_handler/providers/visual_search.dart';
 import 'package:Qdrive/core/engine/providers/inspection_provider.dart.dart';
 import 'package:Qdrive/core/engine/renderer/element_renderer.dart';
 import 'package:Qdrive/core/engine/resolver/json_resolver.dart';
@@ -29,14 +30,14 @@ import 'package:Qdrive/core/engine/screen/screen_builder.dart';
 import 'package:Qdrive/mock/blog_detail_json.dart';
 import 'package:Qdrive/mock/booking_complete_json.dart';
 import 'package:Qdrive/mock/checkout_json.dart';
-import 'package:Qdrive/mock/home_json.dart';
 import 'package:Qdrive/mock/payment_json.dart';
 import 'package:Qdrive/mock/upload_document_json.dart';
 import 'package:Qdrive/mock/vehicle_detail_json.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:hive_flutter/adapters.dart';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:file_picker/file_picker.dart' as fp;
 
 /// Handles JSON-driven actions.
 ///
@@ -65,6 +66,13 @@ class ActionHandler {
 
    
     switch (type) {
+      case 'upload_visual_search_media':
+  await _uploadVisualSearchMedia(context, params);
+  return;
+
+case 'take_visual_search_photo':
+  await _takeVisualSearchPhoto(context, params);
+  return;
       
       case 'active_rental_tray':
         final trayJson =
@@ -1000,6 +1008,127 @@ class ActionHandler {
     }
   }
 
+
+static Future<void> _uploadVisualSearchMedia(
+  BuildContext context,
+  Map<dynamic, dynamic> params,
+) async {
+  try {
+    final result = await fp.FilePicker.pickFiles(
+      type: fp.FileType.custom,
+      allowedExtensions: [
+        'png',
+        'jpg',
+        'jpeg',
+        'mp4',
+      ],
+      allowMultiple: false,
+    );
+
+    if (result == null || result.files.isEmpty) {
+      debugPrint('VISUAL SEARCH MEDIA CANCELLED');
+      return;
+    }
+
+    final file = result.files.single;
+
+    debugPrint('================ VISUAL SEARCH MEDIA ================');
+    debugPrint('File name: ${file.name}');
+    debugPrint('File path: ${file.path}');
+    debugPrint('File size: ${file.size}');
+    debugPrint('=====================================================');
+
+    final container = ProviderScope.containerOf(
+      context,
+      listen: false,
+    );
+
+    container.read(visualSearchMediaProvider.notifier).state =
+        VisualSearchMediaState(
+      fileName: file.name,
+      filePath: file.path,
+      mediaType: file.extension,
+      fromCamera: false,
+    );
+
+    if (!context.mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Selected: ${file.name}'),
+      ),
+    );
+  } catch (e, stackTrace) {
+    debugPrint('VISUAL SEARCH MEDIA ERROR: $e');
+    debugPrint('STACKTRACE: $stackTrace');
+
+    if (!context.mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Could not open media picker'),
+      ),
+    );
+  }
+}
+
+
+static Future<void> _takeVisualSearchPhoto(
+  BuildContext context,
+  Map<dynamic, dynamic> params,
+) async {
+  try {
+    final picker = ImagePicker();
+
+    final photo = await picker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 85,
+    );
+
+    if (photo == null) {
+      debugPrint('VISUAL SEARCH CAMERA CANCELLED');
+      return;
+    }
+
+    debugPrint('================ VISUAL SEARCH PHOTO ================');
+    debugPrint('Photo name: ${photo.name}');
+    debugPrint('Photo path: ${photo.path}');
+    debugPrint('=====================================================');
+
+    final container = ProviderScope.containerOf(
+      context,
+      listen: false,
+    );
+
+    container.read(visualSearchMediaProvider.notifier).state =
+        VisualSearchMediaState(
+      fileName: photo.name,
+      filePath: photo.path,
+      mediaType: 'image',
+      fromCamera: true,
+    );
+
+    if (!context.mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Photo captured for visual search'),
+      ),
+    );
+  } catch (e, stackTrace) {
+    debugPrint('VISUAL SEARCH CAMERA ERROR: $e');
+    debugPrint('STACKTRACE: $stackTrace');
+
+    if (!context.mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Could not open camera'),
+      ),
+    );
+  }
+}
+
   static void _openConfigFilterSheet(
     BuildContext context,
     Map<dynamic, dynamic> params,
@@ -1056,7 +1185,7 @@ class ActionHandler {
       return;
     }
 
-    final resolvedJson = JsonResolver.resolve(
+    final resolvedJson = JsonResolver.resolve(context,
       Map<dynamic, dynamic>.from(trayJson),
     );
 
@@ -1481,7 +1610,7 @@ class ActionHandler {
     BuildContext context,
     Map<dynamic, dynamic> params,
   ) {
-    final resolvedJson = JsonResolver.resolve(carTravelPolicySheetJson);
+    final resolvedJson = JsonResolver.resolve(context,carTravelPolicySheetJson);
 
     final ui = Map<dynamic, dynamic>.from(resolvedJson['ui'] ?? {});
     final layout = List<Map<dynamic, dynamic>>.from(ui['layout'] ?? []);

@@ -542,6 +542,10 @@ class ElementSettings {
       return dark ? const Color(0xFF2A2A2A) : const Color(0xFFE5E7EB);
     }
 
+    if (classes.contains('border-muted-light')) {
+      return  const Color.fromARGB(255, 171, 171, 171) ;
+    }
+
     if (classes.contains('border-primary')) {
       return dark
           ? const Color(0xFFFFFFFF)

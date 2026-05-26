@@ -5,6 +5,7 @@
 
 import 'dart:convert';
 
+import 'package:Qdrive/core/engine/action_handler/providers/visual_search.dart';
 import 'package:Qdrive/core/engine/providers/inspection_provider.dart.dart';
 import 'package:Qdrive/core/engine/style/dashed_border.dart';
 import 'package:Qdrive/core/features/checkout/providers/checkout_mileage_provider.dart';
@@ -138,6 +139,9 @@ class JsonLayoutRenderer extends ConsumerWidget {
       'checkbox_toggle': () => _checkboxToggle(context, ref),
       'switch_button': () => _switchButton(context, ref),
 
+      'visual_search_upload_status': () =>
+    _visualSearchUploadStatus(context, ref),
+
       'support_chat_box': () => _supportChatBox(context, ref),
 
       'ai_chat_suggestions': () => _aiChatSuggestions(context, ref),
@@ -207,6 +211,89 @@ class JsonLayoutRenderer extends ConsumerWidget {
 
     return builders[type]?.call() ?? const SizedBox.shrink();
   }
+
+  Widget _visualSearchUploadStatus(
+  BuildContext context,
+  WidgetRef ref,
+) {
+  final media = ref.watch(visualSearchMediaProvider);
+
+  final hasMedia = media.hasMedia;
+
+  final icon = hasMedia
+      ? node['selectedIcon']?.toString() ?? 'check_circle'
+      : node['emptyIcon']?.toString() ?? 'upload';
+
+  final title = hasMedia
+      ? node['selectedTitle']?.toString() ?? 'Media selected'
+      : node['emptyTitle']?.toString() ?? 'Upload Photo or Video';
+
+  final subtitle = hasMedia
+      ? media.fileName ?? 'Selected file'
+      : node['emptySubtitle']?.toString() ?? 'PNG, JPG, MP4 up to 50MB';
+
+  final helper = hasMedia
+      ? node['selectedSubtitle']?.toString() ?? 'Tap to replace this file'
+      : null;
+
+  final iconClasses = ElementSettings.classList(
+    theme[hasMedia
+        ? node['selectedIconThemeKey'] ?? 'uploadSelectedIcon'
+        : node['iconThemeKey'] ?? 'uploadIcon'],
+  );
+
+  final titleClasses = ElementSettings.classList(
+    theme[hasMedia
+        ? node['selectedTitleThemeKey'] ?? 'uploadSelectedTitle'
+        : node['titleThemeKey'] ?? 'uploadTitle'],
+  );
+
+  final subtitleClasses = ElementSettings.classList(
+    theme[hasMedia
+        ? node['selectedSubtitleThemeKey'] ?? 'uploadSelectedSubtitle'
+        : node['subtitleThemeKey'] ?? 'uploadSubtitle'],
+  );
+
+  return Column(
+    mainAxisAlignment: MainAxisAlignment.center,
+    crossAxisAlignment: CrossAxisAlignment.center,
+    children: [
+      ElementIcons.show(
+        context,
+        icon,
+        size: _iconSize(node['size'] ?? 'xl'),
+        color: ElementSettings.textColor(context, iconClasses),
+      ),
+
+      const SizedBox(height: 12),
+
+      Text(
+        title,
+        textAlign: TextAlign.center,
+        style: ElementSettings.textStyle(context, titleClasses),
+      ),
+
+      const SizedBox(height: 6),
+
+      Text(
+        subtitle,
+        textAlign: TextAlign.center,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: ElementSettings.textStyle(context, subtitleClasses),
+      ),
+
+      if (helper != null && helper.trim().isNotEmpty) ...[
+        const SizedBox(height: 4),
+        Text(
+          helper,
+          textAlign: TextAlign.center,
+          style: ElementSettings.textStyle(context, subtitleClasses),
+        ),
+      ],
+    ],
+  );
+}
 
   bool _boolValue(dynamic value) {
     if (value == true) return true;
@@ -2050,49 +2137,85 @@ class JsonLayoutRenderer extends ConsumerWidget {
   // Reads the current local `plan` from for_each.
   // ==========================================
 
-  Widget _qdrivePassPlanTile(BuildContext context, WidgetRef ref) {
-    final plan = _read(node['key'] ?? 'plan');
+Widget _qdrivePassPlanTile(BuildContext context, WidgetRef ref) {
+  final plan = _read(node['key'] ?? 'plan');
 
-    if (plan is! Map) {
-      return const SizedBox.shrink();
-    }
-
-    final planMap = Map<dynamic, dynamic>.from(plan);
-    final planId = planMap['id']?.toString() ?? '';
-
-    final classes = ElementSettings.classList(
-      theme[node['themeKey'] ?? 'plan'],
-    );
-
-    final childNode = node['child'] is Map
-        ? Map<dynamic, dynamic>.from(node['child'])
-        : <String, dynamic>{};
-
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () {
-        ref.read(selectedQdrivePassPlanProvider.notifier).state = planId;
-
-        ref.read(selectedQdrivePassPlanOptionProvider.notifier).state = planMap;
-
-        ref.read(expandedQdrivePassCoverageProvider.notifier).state = null;
-      },
-      child: Container(
-        width: double.infinity,
-        padding: ElementSettings.padding(classes),
-        decoration: ElementSettings.decoration(context, classes),
-        child: JsonLayoutRenderer(
-          node: childNode,
-          data: data,
-          theme: theme,
-          config: config,
-          currency: currency,
-          locals: locals,
-        ),
-      ),
-    );
+  if (plan is! Map) {
+    return const SizedBox.shrink();
   }
 
+  final planMap = Map<dynamic, dynamic>.from(plan);
+  final planId = planMap['id']?.toString() ?? '';
+
+  final selectedPlanId = ref.watch(selectedQdrivePassPlanProvider);
+  final selected = selectedPlanId == planId;
+
+  final classes = ElementSettings.classList(
+    selected
+        ? theme[node['selectedThemeKey'] ?? 'selectedPlan']
+        : theme[node['themeKey'] ?? 'plan'],
+  );
+
+  final childNode = node['child'] is Map
+      ? Map<dynamic, dynamic>.from(node['child'])
+      : <String, dynamic>{};
+
+  final nextLocals = Map<dynamic, dynamic>.from(locals);
+  nextLocals['plan'] = planMap;
+  nextLocals['planSelected'] = selected;
+
+  return GestureDetector(
+    behavior: HitTestBehavior.opaque,
+    onTap: () {
+      final isAlreadySelected =
+          ref.read(selectedQdrivePassPlanProvider) == planId;
+
+      if (isAlreadySelected) {
+        ref.read(selectedQdrivePassPlanProvider.notifier).state = null;
+        ref.read(selectedQdrivePassPlanOptionProvider.notifier).state = null;
+        ref.read(expandedQdrivePassCoverageProvider.notifier).state = null;
+
+        JsonFormValueStore.setValue('selectedQdrivePass', '');
+
+        ref.read(checkoutFormProvider.notifier).setValue(
+              'selectedQdrivePass',
+              '',
+            );
+
+        return;
+      }
+
+      ref.read(selectedQdrivePassPlanProvider.notifier).state = planId;
+      ref.read(selectedQdrivePassPlanOptionProvider.notifier).state = planMap;
+
+      JsonFormValueStore.setValue('selectedQdrivePass', planId);
+
+      ref.read(checkoutFormProvider.notifier).setValue(
+            'selectedQdrivePass',
+            planId,
+          );
+    },
+    child: Container(
+      width: double.infinity,
+      padding: ElementSettings.padding(classes),
+      decoration: ElementSettings.decoration(context, classes),
+      child: JsonLayoutRenderer(
+        node: childNode,
+        data: data,
+        theme: theme,
+        config: config,
+        currency: currency,
+        locals: nextLocals,
+      ),
+    ),
+  );
+}
+ 
+ 
+ 
+ 
+ 
+ 
   // ==========================================
   // QDrive Pass coverage toggle
   //

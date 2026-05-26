@@ -102,7 +102,7 @@ class QDriveAppBar extends ConsumerWidget {
       return;
     }
 
-    final resolved = JsonResolver.resolve(menuJson);
+    final resolved = JsonResolver.resolve(context,menuJson);
 
     final layout = List<Map<dynamic, dynamic>>.from(
       resolved['ui']?['layout'] ?? [],

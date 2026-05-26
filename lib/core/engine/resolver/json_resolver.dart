@@ -1,3 +1,4 @@
+import 'package:Qdrive/core/engine/localization/json_translator.dart';
 import 'package:Qdrive/core/engine/style/element_icons.dart';
 import 'package:Qdrive/core/engine/style/element_settings.dart';
 import 'package:Qdrive/core/shared/providers/flight_detail_provider.dart';
@@ -16,38 +17,55 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// - `value` is preferred over `fallback`.
 /// - Old JSON with root-level `layout` still works.
 class JsonResolver {
-  static Map<dynamic, dynamic> resolve(Map<dynamic, dynamic> json) {
-    final resolvedJson = Map<dynamic, dynamic>.from(json);
-    final actions = Map<dynamic, dynamic>.from(json['actions'] ?? {});
+static Map<dynamic, dynamic> resolve(
+  BuildContext context,
+  Map<dynamic, dynamic> json,
+) {
+  final resolvedJson = Map<dynamic, dynamic>.from(json);
 
-    final ui = Map<dynamic, dynamic>.from(
-      json['ui'] ??
-          {
-            "showAppBar": json['showAppBar'] != false,
-            "layout": json['layout'] ?? [],
-          },
-    );
+  final actions = Map<dynamic, dynamic>.from(
+    json['actions'] ?? {},
+  );
 
-    final rawLayout = List<Map<dynamic, dynamic>>.from(ui['layout'] ?? []);
+  final ui = Map<dynamic, dynamic>.from(
+    json['ui'] ??
+        {
+          "showAppBar": json['showAppBar'] != false,
+          "layout": json['layout'] ?? [],
+        },
+  );
 
-    final resolvedLayout = rawLayout
-        .where((item) {
-          return _isVisible(json, item);
-        })
-        .map((item) {
-          final resolvedItem = _resolveElement(json, item);
+  final rawLayout = List<Map<dynamic, dynamic>>.from(
+    ui['layout'] ?? [],
+  );
 
-          return Map<dynamic, dynamic>.from(
-            _resolveActionRefsDeep(resolvedItem, actions),
-          );
-        })
-        .toList();
+  final resolvedLayout = rawLayout
+      .where((item) {
+        return _isVisible(json, item);
+      })
+      .map((item) {
+        final resolvedItem = _resolveElement(
+          context,
+          json,
+          item,
+        );
 
-    resolvedJson['ui'] = {...ui, "layout": resolvedLayout};
+        return Map<dynamic, dynamic>.from(
+          _resolveActionRefsDeep(
+            resolvedItem,
+            actions,
+          ),
+        );
+      })
+      .toList();
 
-    return resolvedJson;
-  }
+  resolvedJson['ui'] = {
+    ...ui,
+    "layout": resolvedLayout,
+  };
 
+  return resolvedJson;
+}
   static dynamic _resolveActionRefsDeep(
     dynamic value,
     Map<dynamic, dynamic> actions,
@@ -86,99 +104,173 @@ class JsonResolver {
   /// - resolved `...Key` props
   /// - resolved `actionRef`
   /// - item-level actions
-  static Map<dynamic, dynamic> _resolveElement(
-    Map<dynamic, dynamic> rootJson,
-    Map<dynamic, dynamic> item,
-  ) {
-    final resolved = Map<dynamic, dynamic>.from(item);
-    final props = Map<dynamic, dynamic>.from(item['props'] ?? {});
-    final actions = Map<dynamic, dynamic>.from(rootJson['actions'] ?? {});
+ static Map<dynamic, dynamic> _resolveElement(
+  BuildContext context,
+  Map<dynamic, dynamic> rootJson,
+  Map<dynamic, dynamic> item,
+) {
+  final resolved = Map<dynamic, dynamic>.from(item);
 
-    final bindPath = item['bind'];
-    final boundData = bindPath is String
-        ? _resolveBind(rootJson, bindPath)
-        : null;
+  final props = Map<dynamic, dynamic>.from(
+    item['props'] ?? {},
+  );
+
+  final actions = Map<dynamic, dynamic>.from(
+    rootJson['actions'] ?? {},
+  );
+
+  final bindPath = item['bind'];
+
+  final boundData = bindPath is String
+      ? _resolveBind(rootJson, bindPath)
+      : null;
+
+  if (boundData is Map<dynamic, dynamic>) {
+    props.addAll(boundData);
+  }
+
+  dynamic readBound(String? key) {
+    if (key == null) return null;
 
     if (boundData is Map<dynamic, dynamic>) {
-      props.addAll(boundData);
+      return _readPath(boundData, key);
     }
 
-    dynamic readBound(String? key) {
-      if (key == null) return null;
-      if (boundData is Map<dynamic, dynamic>) {
-        return _readPath(boundData, key);
-      }
-      return null;
+    return null;
+  }
+
+  dynamic readPath(String path) {
+    return _readPath(rootJson, path);
+  }
+
+  void resolveActionRef(Map<dynamic, dynamic> map) {
+    final ref = map['actionRef'];
+
+    if (ref is String && actions[ref] != null) {
+      map['action'] = _copyAction(actions[ref]);
+      map.remove('actionRef');
     }
+  }
 
-    dynamic readPath(String path) => _readPath(rootJson, path);
+  _resolveBasicKeys(
+    context,
+    rootJson,
+    props,
+    readBound,
+  );
 
-    void resolveActionRef(Map<dynamic, dynamic> map) {
-      final ref = map['actionRef'];
-      if (ref is String && actions[ref] != null) {
-        map['action'] = _copyAction(actions[ref]);
-        map.remove('actionRef');
-      }
-    }
-
-    _resolveBasicKeys(props, readBound);
-
-    if (item['type'] == 'payment_method_section') {
-      resolved['props'] = props;
-      _resolvePaymentMethod(resolved, actions);
-      return resolved;
-    }
-
-    if (item['type'] == 'checkout_flow') {
-      resolved['props'] = props;
-      _resolveCheckoutFlow(resolved, rootJson, actions);
-      return resolved;
-    }
-
-    if (item['type'] == 'active_card' || item['type'] == 'active_rental_tray') {
-      _resolveActiveCard(props, actions, readBound);
-    }
-
-    if (item['type'] == 'detail_gallery') {
-      _resolveGalleryActions(props, actions, boundData);
-    }
-
-    if (item['type'] == 'bottom_bar') {
-      _resolveBottomBar(props, actions, boundData);
-    }
-
-    if (item['type'] == 'blog_post_list') {
-      _resolveBlogPostActions(props, actions);
-    }
-
-    if (item['type'] == 'document_upload_card') {
-      _resolveDocumentUploadCard(resolved, props, boundData, actions);
-      return resolved;
-    }
-
-    if (item['type'] == 'related_post_list') {
-      _resolveBlogPostActions(props, actions);
-    }
-
-    _resolveItemActions(props, actions);
-    _resolveButtonGroupActions(props, actions);
-
-    _resolveSort(props, actions, readPath);
-
-    if (item['type'] == 'list_cards') {
-      _resolveListCardActions(props, actions);
-    }
-
-    if (item['type'] == 'featured_card') {
-      _resolveFeaturedVehicleActions(props, actions);
-    }
-
-    resolveActionRef(props);
-
+  if (item['type'] == 'payment_method_section') {
     resolved['props'] = props;
+
+    _resolvePaymentMethod(
+      resolved,
+      actions,
+    );
+
     return resolved;
   }
 
+  if (item['type'] == 'checkout_flow') {
+    resolved['props'] = props;
+
+    _resolveCheckoutFlow(
+      context,
+      resolved,
+      rootJson,
+      actions,
+    );
+
+    return resolved;
+  }
+
+  if (item['type'] == 'active_card' ||
+      item['type'] == 'active_rental_tray') {
+    _resolveActiveCard(
+      props,
+      actions,
+      readBound,
+    );
+  }
+
+  if (item['type'] == 'detail_gallery') {
+    _resolveGalleryActions(
+      props,
+      actions,
+      boundData,
+    );
+  }
+
+  if (item['type'] == 'bottom_bar') {
+    _resolveBottomBar(
+      props,
+      actions,
+      boundData,
+    );
+  }
+
+  if (item['type'] == 'blog_post_list') {
+    _resolveBlogPostActions(
+      props,
+      actions,
+    );
+  }
+
+  if (item['type'] == 'document_upload_card') {
+    _resolveDocumentUploadCard(
+      context,
+      rootJson,
+      resolved,
+      props,
+      boundData,
+      actions,
+    );
+
+    return resolved;
+  }
+
+  if (item['type'] == 'related_post_list') {
+    _resolveBlogPostActions(
+      props,
+      actions,
+    );
+  }
+
+  _resolveItemActions(
+    props,
+    actions,
+  );
+
+  _resolveButtonGroupActions(
+    props,
+    actions,
+  );
+
+  _resolveSort(
+    props,
+    actions,
+    readPath,
+  );
+
+  if (item['type'] == 'list_cards') {
+    _resolveListCardActions(
+      props,
+      actions,
+    );
+  }
+
+  if (item['type'] == 'featured_card') {
+    _resolveFeaturedVehicleActions(
+      props,
+      actions,
+    );
+  }
+
+  resolveActionRef(props);
+
+  resolved['props'] = props;
+
+  return resolved;
+}
   static void _resolveBlogPostActions(
     Map<dynamic, dynamic> props,
     Map<dynamic, dynamic> actions,
@@ -222,49 +314,66 @@ class JsonResolver {
   }
 
   static void _resolveDocumentUploadCard(
-    Map<dynamic, dynamic> resolved,
-    Map<dynamic, dynamic> props,
-    dynamic boundData,
-    Map<dynamic, dynamic> actions,
-  ) {
-    final documentBind = resolved['documentBind'];
+  BuildContext context,
+  Map<dynamic, dynamic> rootJson,
+  Map<dynamic, dynamic> resolved,
+  Map<dynamic, dynamic> props,
+  dynamic boundData,
+  Map<dynamic, dynamic> actions,
+) {
+  final documentBind = resolved['documentBind'];
 
-    if (documentBind is String && boundData is Map<dynamic, dynamic>) {
-      final documentData = _readPath(boundData, documentBind);
+  if (documentBind is String &&
+      boundData is Map<dynamic, dynamic>) {
+    final documentData = _readPath(
+      boundData,
+      documentBind,
+    );
 
-      if (documentData is Map<dynamic, dynamic>) {
-        dynamic readDocument(String? key) {
-          if (key == null) return null;
-          return _readPath(documentData, key);
-        }
+    if (documentData is Map<dynamic, dynamic>) {
+      dynamic readDocument(String? key) {
+        if (key == null) return null;
 
-        _resolveBasicKeys(props, readDocument);
-      }
-    }
-
-    final button = props['button'];
-    if (button is Map<dynamic, dynamic>) {
-      final resolvedButton = Map<dynamic, dynamic>.from(button);
-      final actionRef = resolvedButton['actionRef'];
-
-      if (actionRef is String && actions[actionRef] != null) {
-        final action = _copyAction(actions[actionRef]);
-
-        action['params'] = {
-          ...Map<dynamic, dynamic>.from(action['params'] ?? {}),
-          "documentType": props['documentType'],
-        };
-
-        resolvedButton['action'] = action;
-        resolvedButton.remove('actionRef');
+        return _readPath(documentData, key);
       }
 
-      props['button'] = resolvedButton;
+      _resolveBasicKeys(
+        context,
+        rootJson,
+        props,
+        readDocument,
+      );
     }
-
-    resolved['props'] = props;
   }
 
+  final button = props['button'];
+
+  if (button is Map<dynamic, dynamic>) {
+    final resolvedButton = Map<dynamic, dynamic>.from(button);
+
+    final actionRef = resolvedButton['actionRef'];
+
+    if (actionRef is String &&
+        actions[actionRef] != null) {
+      final action = _copyAction(actions[actionRef]);
+
+      action['params'] = {
+        ...Map<dynamic, dynamic>.from(
+          action['params'] ?? {},
+        ),
+        "documentType": props['documentType'],
+      };
+
+      resolvedButton['action'] = action;
+
+      resolvedButton.remove('actionRef');
+    }
+
+    props['button'] = resolvedButton;
+  }
+
+  resolved['props'] = props;
+}
   static void _resolvePaymentMethod(
     Map<dynamic, dynamic> resolved,
     Map<dynamic, dynamic> actions,
@@ -334,8 +443,9 @@ class JsonResolver {
     resolved['props'] = props;
   }
 
-  static void _resolveCheckoutFlow(
-    Map<dynamic, dynamic> resolved,
+ static void _resolveCheckoutFlow(
+  BuildContext context,
+  Map<dynamic, dynamic> resolved,
     Map<dynamic, dynamic> rootJson,
     Map<dynamic, dynamic> actions,
   ) {
@@ -456,7 +566,12 @@ class JsonResolver {
             return null;
           }
 
-          _resolveBasicKeys(sectionProps, readSection);
+          _resolveBasicKeys(
+  context,
+  rootJson,
+  sectionProps,
+  readSection,
+);
 
           final selectionKey =
               section['selectionKey'] ?? sectionProps['selectionKey'];
@@ -598,154 +713,242 @@ class JsonResolver {
   ///
   /// Supports nested keys too:
   /// `"priceKey": "price.total.value"`.
-  static void _resolveBasicKeys(
-    Map<dynamic, dynamic> props,
-    dynamic Function(String? key) readBound,
-  ) {
-    final keyMappings = {
-      "placeholderKey": "placeholder",
-      "titleKey": "title",
-      "subtitleKey": "subtitle",
-      "labelKey": "label",
-      "tagKey": "tag",
-      "currencyKey": "currency",
+ static void _resolveBasicKeys(
+  BuildContext context,
+  Map<dynamic, dynamic> rootJson,
+  Map<dynamic, dynamic> props,
+  dynamic Function(String? key) readBound,
+) {
+  final keyMappings = {
+    "placeholderKey": "placeholder",
+    "titleKey": "title",
+    "subtitleKey": "subtitle",
+    "labelKey": "label",
+    "tagKey": "tag",
+    "currencyKey": "currency",
 
-      "vehicleNameKey": "vehicleName",
-      "viewTitleKey": "viewTitle",
-      "viewSubtitleKey": "viewSubtitle",
-      "viewHintKey": "viewHint",
-      "selectedModeKey": "selectedMode",
-      "selectedAngleKey": "selectedAngle",
-      "modesKey": "modes",
-      "anglesKey": "angles",
+    "vehicleNameKey": "vehicleName",
+    "viewTitleKey": "viewTitle",
+    "viewSubtitleKey": "viewSubtitle",
+    "viewHintKey": "viewHint",
+    "selectedModeKey": "selectedMode",
+    "selectedAngleKey": "selectedAngle",
+    "modesKey": "modes",
+    "anglesKey": "angles",
 
-      "statusKey": "status",
-      "suggestionsKey": "suggestions",
-      "messagesKey": "messages",
-      "footerTextKey": "footerText",
-      "bottomTextKey": "bottomText",
+    "statusKey": "status",
+    "suggestionsKey": "suggestions",
+    "messagesKey": "messages",
+    "footerTextKey": "footerText",
+    "bottomTextKey": "bottomText",
 
-      // New common keys
-      "suffixKey": "suffix",
-      "iconKey": "icon",
-      "titleIconKey": "titleIcon",
-      "textKey": "text",
-      "itemIconKey": "itemIcon",
+    "suffixKey": "suffix",
+    "iconKey": "icon",
+    "titleIconKey": "titleIcon",
+    "textKey": "text",
+    "itemIconKey": "itemIcon",
 
-      // Vehicle/detail keys
-      "vehicleIdKey": "vehicleId",
-      "ratingKey": "rating",
-      "specsKey": "specs",
-      "imagesKey": "images",
-      "currentImageIndexKey": "currentImageIndex",
+    "vehicleIdKey": "vehicleId",
+    "ratingKey": "rating",
+    "specsKey": "specs",
+    "imagesKey": "images",
+    "currentImageIndexKey": "currentImageIndex",
 
-      // Location section keys
-      "locationTitleKey": "locationTitle",
-      "addressKey": "address",
-      "hoursKey": "hours",
+    "locationTitleKey": "locationTitle",
+    "addressKey": "address",
+    "hoursKey": "hours",
 
-      "bookingIdKey": "bookingId",
-      "endDateKey": "endDate",
-      "showCloseKey": "showClose",
+    "bookingIdKey": "bookingId",
+    "endDateKey": "endDate",
+    "showCloseKey": "showClose",
 
-      // Price/bottom bar keys
-      "priceKey": "price",
+    "priceKey": "price",
 
-      "durationKey": "duration",
-      "descriptionKey": "description",
-      "optionsKey": "options",
-      "selectedStateKey": "selectedState",
+    "durationKey": "duration",
+    "descriptionKey": "description",
+    "optionsKey": "options",
+    "selectedStateKey": "selectedState",
 
-      "valueKey": "value",
-      "progressKey": "progress",
-      "progressLabelKey": "progressLabel",
-      "messageKey": "message",
-      "timeKey": "time",
-      "phoneKey": "phone",
-      "licenseKey": "license",
-      "nameKey": "name",
+    "valueKey": "value",
+    "progressKey": "progress",
+    "progressLabelKey": "progressLabel",
+    "messageKey": "message",
+    "timeKey": "time",
+    "phoneKey": "phone",
+    "licenseKey": "license",
+    "nameKey": "name",
 
-      "currentStepKey": "currentStep",
-      "totalStepsKey": "totalSteps",
-      "stepsKey": "steps",
+    "currentStepKey": "currentStep",
+    "totalStepsKey": "totalSteps",
+    "stepsKey": "steps",
 
-      "fieldsKey": "fields",
-      "totalKey": "total",
-      "noteKey": "note",
-      "highlightTextKey": "highlightText",
-      "paymentMethodKey": "paymentMethod",
-      "selectedPaymentIdKey": "selectedPaymentId",
-      "selectedProviderIdKey": "selectedProviderId",
-      "buttonLabelKey": "buttonLabel",
-      "layoutKey": "layout",
-      "sectionTitleKey": "sectionTitle",
-      "linkLabelKey": "linkLabel",
+    "fieldsKey": "fields",
+    "totalKey": "total",
+    "noteKey": "note",
+    "highlightTextKey": "highlightText",
+    "paymentMethodKey": "paymentMethod",
+    "selectedPaymentIdKey": "selectedPaymentId",
+    "selectedProviderIdKey": "selectedProviderId",
+    "buttonLabelKey": "buttonLabel",
+    "layoutKey": "layout",
+    "sectionTitleKey": "sectionTitle",
+    "linkLabelKey": "linkLabel",
 
-      "totalRequiredKey": "totalRequired",
-      "uploadedCountKey": "uploadedCount",
-      "showWhenUploadedCountAtLeastKey": "showWhenUploadedCountAtLeast",
-      "checksByDocumentTypeKey": "checksByDocumentType",
-      "fieldsByDocumentTypeKey": "fieldsByDocumentType",
-      "documentTypeKey": "documentType",
-      "uploadedKey": "uploaded",
-      "fileNameKey": "fileName",
-      "missingLabelKey": "missingLabel",
-      "uploadedLabelKey": "uploadedLabel",
+    "totalRequiredKey": "totalRequired",
+    "uploadedCountKey": "uploadedCount",
+    "showWhenUploadedCountAtLeastKey":
+        "showWhenUploadedCountAtLeast",
+    "checksByDocumentTypeKey": "checksByDocumentType",
+    "fieldsByDocumentTypeKey": "fieldsByDocumentType",
+    "documentTypeKey": "documentType",
+    "uploadedKey": "uploaded",
+    "fileNameKey": "fileName",
+    "missingLabelKey": "missingLabel",
+    "uploadedLabelKey": "uploadedLabel",
 
-      "brandKey": "brand",
-      "taglineKey": "tagline",
-      "menuIconKey": "menuIcon",
-      "locationIconKey": "locationIcon",
-      "locationKey": "location",
-      "searchHintKey": "searchHint",
-      "cameraIconKey": "cameraIcon",
-      "departureLabelKey": "departureLabel",
-      "departurePlaceholderKey": "departurePlaceholder",
-      "deliverLabelKey": "deliverLabel",
-      "deliverPlaceholderKey": "deliverPlaceholder",
-      "collectLabelKey": "collectLabel",
-      "collectPlaceholderKey": "collectPlaceholder",
-      "returnElsewhereKey": "returnElsewhere",
-      "withDriverKey": "withDriver",
-      "promoKey": "promo",
-      "moreFiltersKey": "moreFilters",
-      "eyebrowKey": "eyebrow",
-      "eyebrowIconKey": "eyebrowIcon",
-      "tagsKey": "tags",
-      "categoryKey": "category",
-      "backgroundImageKey": "backgroundImage",
-      "seatsKey": "seats",
-      "transmissionKey": "transmission",
-      "profileKey": "profile",
-      "sectionsKey": "sections",
-      "featureCardKey": "featureCard",
-      "fuelKey": "fuel",
-      "backLabelKey": "backLabel",
-      "bodyKey": "body",
-      "categoryIconKey": "categoryIcon",
-      "imageKey": "image",
-      "checkIconKey": "checkIcon",
-    };
+    "brandKey": "brand",
+    "taglineKey": "tagline",
+    "menuIconKey": "menuIcon",
+    "locationIconKey": "locationIcon",
+    "locationKey": "location",
+    "searchHintKey": "searchHint",
+    "cameraIconKey": "cameraIcon",
+    "departureLabelKey": "departureLabel",
+    "departurePlaceholderKey": "departurePlaceholder",
+    "deliverLabelKey": "deliverLabel",
+    "deliverPlaceholderKey": "deliverPlaceholder",
+    "collectLabelKey": "collectLabel",
+    "collectPlaceholderKey": "collectPlaceholder",
+    "returnElsewhereKey": "returnElsewhere",
+    "withDriverKey": "withDriver",
+    "promoKey": "promo",
+    "moreFiltersKey": "moreFilters",
+    "eyebrowKey": "eyebrow",
+    "eyebrowIconKey": "eyebrowIcon",
+    "tagsKey": "tags",
+    "categoryKey": "category",
+    "backgroundImageKey": "backgroundImage",
+    "seatsKey": "seats",
+    "transmissionKey": "transmission",
+    "profileKey": "profile",
+    "sectionsKey": "sections",
+    "featureCardKey": "featureCard",
+    "fuelKey": "fuel",
+    "backLabelKey": "backLabel",
+    "bodyKey": "body",
+    "categoryIconKey": "categoryIcon",
+    "imageKey": "image",
+    "checkIconKey": "checkIcon",
+  };
 
-    keyMappings.forEach((keyName, outputName) {
-      final sourceKey = props[keyName];
-      if (sourceKey is String) {
-        final value = readBound(sourceKey);
-        if (value != null) {
-          props[outputName] = value;
-        }
-      }
-    });
+  // ==========================================
+  // Dynamic translation resolver
+  // Supports:
+  // title_key
+  // subtitle_key
+  // label_key
+  // saveButton_key
+  // etc
+  // ==========================================
 
-    if (props['titleCountKey'] is String) {
-      props['titleCount'] = '${readBound(props['titleCountKey']) ?? ''}';
-    }
+   final translationKeys = props.keys
+      .where(
+        (key) =>
+            key.toString().endsWith('_key'),
+      )
+      .toList();
 
-    if (props['itemsKey'] is String) {
-      props['items'] = readBound(props['itemsKey']) ?? [];
+  for (final key in translationKeys) {
+    final value = props[key];
+
+    if (value is String) {
+      final outputKey = key
+          .toString()
+          .replaceAll('_key', '');
+
+      props[outputKey] =
+          JsonTranslator.translate(
+        context: context,
+        rootJson: rootJson,
+        key: value,
+      );
     }
   }
 
+  
+    // ==========================================
+  // Translate nested list items
+  // Example:
+  // notificationItems[]
+  // sections[]
+  // options[]
+  // ==========================================
+
+  for (final entry in props.entries.toList()) {
+    final value = entry.value;
+
+    if (value is List) {
+      for (final item in value) {
+        if (item is Map<dynamic, dynamic>) {
+          final itemTranslationKeys = item.keys
+              .where(
+                (key) =>
+                    key.toString().endsWith('_key'),
+              )
+              .toList();
+
+          for (final key in itemTranslationKeys) {
+            final translationValue = item[key];
+
+            if (translationValue is String) {
+              final outputKey = key
+                  .toString()
+                  .replaceAll('_key', '');
+
+              item[outputKey] =
+                  JsonTranslator.translate(
+                context: context,
+                rootJson: rootJson,
+                key: translationValue,
+              );
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  
+  // ==========================================
+  // Existing dynamic bind resolver
+  // ==========================================
+
+  keyMappings.forEach((keyName, outputName) {
+    final sourceKey = props[keyName];
+
+    if (sourceKey is String) {
+      final value = readBound(sourceKey);
+
+      if (value != null) {
+        props[outputName] = value;
+      }
+    }
+  });
+
+  // ==========================================
+  // Special handling
+  // ==========================================
+
+  if (props['titleCountKey'] is String) {
+    props['titleCount'] =
+        '${readBound(props['titleCountKey']) ?? ''}';
+  }
+
+  if (props['itemsKey'] is String) {
+    props['items'] =
+        readBound(props['itemsKey']) ?? [];
+  }
+}
   /// Resolves active rental card dynamic props.
   static void _resolveActiveCard(
     Map<dynamic, dynamic> props,
